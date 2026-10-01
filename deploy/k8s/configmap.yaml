@@ -1,0 +1,15 @@
+# The settings that are not secret and that you may want to change without a
+# trip to 1Password.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: meal-planner-config
+  namespace: meal-planner
+data:
+  ZIP_CODE: "80126"
+  # Wildcat Reserve, 2205 W Wildcat Reserve Pkwy, Highlands Ranch
+  KROGER_LOCATION_ID: "62000008"
+  KROGER_REDIRECT_URI: "http://localhost:8000/callback"
+  WEEKLY_BUDGET_SOFT: "425"
+  WEEKLY_BUDGET_HARD: "500"
+  TZ: "America/Denver"
