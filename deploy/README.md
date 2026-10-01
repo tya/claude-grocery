@@ -27,108 +27,96 @@ Slack references there already point at `tynet`; the Kroger ones still say
 When you create the service account, check that `tynet` appears in its vault
 list. If it does not, service accounts are turned off for that vault.
 
-## 2. Install the 1Password Kubernetes operator
+## 2. Install the 1Password operator
 
-Service account mode — no Connect server to run, patch or back up.
+Everything from here runs **on the Pi**. Copy the repo over (or clone it there)
+and work from `deploy/`.
 
-```sh
-microk8s enable helm3 hostpath-storage registry
-microk8s helm3 repo add 1password https://1password.github.io/connect-helm-charts
-microk8s helm3 repo update
-```
-
-Create the token secret yourself. It should not pass through a chat window, and
-`read -rs` keeps it out of your shell history:
+Check the node before changing anything:
 
 ```sh
-read -rs OP_TOKEN            # paste the service account token, then Enter
-microk8s kubectl create namespace onepassword
-microk8s kubectl -n onepassword create secret generic onepassword-service-account \
-  --from-literal=token="$OP_TOKEN"
-unset OP_TOKEN
+./install.sh preflight
 ```
 
-Then install the operator alone, with Connect switched off:
+It fails loudly on the two things that bite a Pi specifically:
+
+- **Memory cgroup off.** On a Pi this is disabled unless it was turned on in the
+  boot cmdline, and without it any pod with a memory limit — this one has one —
+  is killed at startup with an error that never mentions the Pi. Fix is one line
+  in `/boot/firmware/cmdline.txt` plus a reboot; the script prints it.
+- **Storage on the SD card.** `hostpath-storage` writes under the snap common
+  dir on the root filesystem. If root is the SD card, the database and every
+  SQLite write land there — slow, and it wears the card out. The script names
+  the backing device so you can see where it is actually going.
+
+Then:
 
 ```sh
-microk8s helm3 upgrade --install onepassword 1password/connect \
-  --namespace onepassword \
-  --set connect.create=false \
-  --set operator.create=true \
-  --set operator.watchNamespace="{meal-planner}"
+./install.sh operator
 ```
 
-The operator reads its credential from `OP_SERVICE_ACCOUNT_TOKEN`. The chart's
-value name for this has moved between versions, so check yours rather than
-trusting a flag from a blog post:
+This enables the addons, installs the chart with Connect switched off, and asks
+for the service account token with `read -rs` — not echoed, not in your shell
+history, never through this chat. It also verifies the operator really received
+`OP_SERVICE_ACCOUNT_TOKEN` and sets it directly if the chart's value name has
+moved again, which it has before.
+
+## 3. Build the image on the Mac and ship it
+
+The node is arm64, so the image must be arm64. From the repo root on your Mac:
 
 ```sh
-microk8s helm3 show values 1password/connect | grep -i -A3 'serviceaccount\|token'
+./deploy/build-image.sh pi.lan              # push to the node's registry
+./deploy/build-image.sh pi.lan --tarball    # or ship it over ssh, no registry
 ```
 
-If the chart has no value for it, set it on the deployment directly — it is one
-environment variable:
+It refuses to ship an image built for the wrong architecture. That check is
+there because the failure otherwise surfaces much later, as `exec format error`
+in a crash loop, long after the push looked fine — `better-sqlite3` is native
+code, so a mismatched build cannot be papered over.
+
+The Deployment refers to `localhost:32000/meal-planner:0.1.0`. That is correct
+even when you push to `pi.lan:32000`: containerd resolves it on the node, where
+the registry is local.
+
+## 4. Seed the volume
+
+The database and the Kroger refresh token already exist on your Mac. A fresh
+start would lose two years of history and force a re-auth.
+
+**Stop the bot first.** Copying a database with a live WAL gives you a torn
+copy — this is the step in the whole process with a real, irreversible cost.
 
 ```sh
-microk8s kubectl -n onepassword set env deploy/onepassword-connect-operator \
-  --from=secret/onepassword-service-account --keys=token \
-  --prefix=OP_SERVICE_ACCOUNT_
+# On the Mac, with the bot stopped:
+sqlite3 ~/.claude-grocery/claude-grocery.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+scp ~/.claude-grocery/claude-grocery.db \
+    ~/.config/claude-grocery/kroger-token.json \
+    ~/src/claude-grocery-kroger-agent/data/week-events.json \
+    pi.lan:~/claude-grocery-kroger-agent/deploy/seed/
+
+# On the Pi:
+./install.sh seed
 ```
 
-Confirm it came up clean before going further:
-
-```sh
-microk8s kubectl -n onepassword logs deploy/onepassword-connect-operator | tail -20
-```
-
-## 3. Build and push the image
-
-```sh
-microk8s ctr images ls | head -1                  # registry addon is at :32000
-podman build -f deploy/Containerfile -t localhost:32000/meal-planner:0.1.0 .
-podman push --tls-verify=false localhost:32000/meal-planner:0.1.0
-```
-
-## 4. Seed the volume before the first start
-
-The database and the Kroger refresh token already exist on your Mac. Create the
-claim, then copy them in — a fresh start would lose two years of history and
-force a re-auth.
-
-```sh
-microk8s kubectl apply -f k8s/namespace.yaml -f k8s/pvc.yaml
-
-# A throwaway pod just to get a shell on the volume.
-microk8s kubectl -n meal-planner run seed --rm -it --restart=Never \
-  --image=busybox --overrides='
-{"spec":{"containers":[{"name":"seed","image":"busybox","command":["sh"],
-"stdin":true,"tty":true,"volumeMounts":[{"name":"d","mountPath":"/data"}]}],
-"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"meal-planner-data"}}]}}'
-
-# From another terminal:
-microk8s kubectl -n meal-planner cp \
-  ~/.claude-grocery/claude-grocery.db seed:/data/claude-grocery.db
-microk8s kubectl -n meal-planner cp \
-  ~/.config/claude-grocery/kroger-token.json seed:/data/kroger-token.json
-microk8s kubectl -n meal-planner cp \
-  ~/src/claude-grocery-kroger-agent/data/week-events.json seed:/data/week-events.json
-```
-
-Copy the database while the bot is **stopped**, or you will copy a half-written
-WAL. If `claude-grocery.db-wal` exists and is large, open the database once
-locally and close it cleanly first.
+`deploy/seed/` is gitignored — the database and the token must never end up in
+the repo.
 
 ## 5. Deploy
 
 ```sh
-microk8s kubectl apply -k k8s/
-microk8s kubectl -n meal-planner get onepassworditem               # want: both present
-microk8s kubectl -n meal-planner get secret kroger-credentials slack-credentials
-microk8s kubectl -n meal-planner logs -f deploy/meal-planner
+./install.sh deploy
+./install.sh status
 ```
 
+`deploy` waits for the operator to produce both Secrets and, if they never
+arrive, prints the three things that actually cause it — item still in
+`Private`, vault not granted to the service account, item name not matching
+`itemPath` — along with the operator's own log.
+
 The `--push` arg in `deployment.yaml` makes it post the week on start, which is
-a useful smoke test. Remove it once a real timer exists.
+the real smoke test: if a plan shows up in Slack, every piece of this worked.
+Remove it once a timer exists.
 
 ## What is deliberately not here
 
