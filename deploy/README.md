@@ -11,15 +11,21 @@ one PVC on local SSD.
 ## 1. Move the secrets to a shared vault
 
 A 1Password service account can only be granted vaults its creator can share,
-and a personal vault is not one of those. The items currently live in `Private`,
-so move them to a shared vault (this guide assumes one called `Homelab`):
+and a personal vault is not one of those. Both items have to live in the `tynet`
+vault:
 
-- `kroger.developer` — fields `client_id`, `client_secret`
-- `slack.mealplanner` — fields `bot_token`, `app_token`, `user_id`,
-  `allowed_users`, `channel_id`
+- `slack.mealplanner` — `bot_token`, `app_token`, `user_id`, `allowed_users`,
+  `channel_id`. **Already moved.**
+- `kroger.developer` — `client_id`, `client_secret`. **Still in `Private`** —
+  move it, or `kroger-credentials` will never sync and the pod will start with
+  no Kroger access.
 
-When you create the service account, check that the vault appears in its list.
-If it does not, service accounts are turned off for that vault.
+Moving an item changes its `op://` path, so `.env.op` tracks the vault too. The
+Slack references there already point at `tynet`; the Kroger ones still say
+`Private` and should be changed in the same breath as the move.
+
+When you create the service account, check that `tynet` appears in its vault
+list. If it does not, service accounts are turned off for that vault.
 
 ## 2. Install the 1Password Kubernetes operator
 

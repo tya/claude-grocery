@@ -29,8 +29,8 @@ inbound firewall rule.
 Store all three in 1Password and add them to `.env.op`:
 
 ```
-SLACK_BOT_TOKEN=op://Private/slack.mealplanner/bot_token
-SLACK_APP_TOKEN=op://Private/slack.mealplanner/app_token
+SLACK_BOT_TOKEN=op://tynet/slack.mealplanner/bot_token
+SLACK_APP_TOKEN=op://tynet/slack.mealplanner/app_token
 SLACK_USER_ID=U0123456789
 SLACK_CHANNEL=D0123456789   # the DM or channel the Saturday plan goes to
 ```
