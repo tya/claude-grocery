@@ -66,12 +66,13 @@ describe('Database integration', () => {
     it('upserts and retrieves a household', () => {
       const household = repo.upsert({
         zipCode: '80202',
-        weeklyBudget: 150,
+        budgetWeekly: 150,
       });
 
       expect(household).toBeDefined();
       expect(household.id).toBeDefined();
       expect(household.zipCode).toBe('80202');
+      expect(household.budgetWeekly).toBe(150);
 
       const retrieved = repo.get();
       expect(retrieved).toBeDefined();
@@ -81,10 +82,11 @@ describe('Database integration', () => {
     it('updates an existing household', () => {
       const updated = repo.upsert({
         zipCode: '80210',
-        weeklyBudget: 200,
+        budgetWeekly: 200,
       });
 
       expect(updated.zipCode).toBe('80210');
+      expect(updated.budgetWeekly).toBe(200);
 
       const retrieved = repo.get();
       expect(retrieved!.zipCode).toBe('80210');
