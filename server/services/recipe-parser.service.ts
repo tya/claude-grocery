@@ -377,11 +377,21 @@ const USER_AGENTS = [
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
 ];
 
+/**
+ * How long to wait for one attempt.
+ *
+ * Node's fetch has no default timeout, and a site that accepts the connection
+ * and then never answers will hang the import for ever — which is exactly what
+ * a bot-hostile recipe site does. Every attempt gets a deadline.
+ */
+const FETCH_TIMEOUT_MS = Number(process.env.RECIPE_FETCH_TIMEOUT_MS ?? 20_000);
+
 async function fetchRecipeHtml(url: string): Promise<string | null> {
   let lastStatus = 0;
   for (const userAgent of USER_AGENTS) {
     try {
       const response = await fetch(url, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         headers: {
           'User-Agent': userAgent,
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -392,7 +402,12 @@ async function fetchRecipeHtml(url: string): Promise<string | null> {
       lastStatus = response.status;
       log('debug', `Recipe fetch ${response.status} with agent "${userAgent.slice(0, 24)}..."`);
     } catch (error) {
-      log('debug', `Recipe fetch threw for ${url}`, error);
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      log(
+        timedOut ? 'warn' : 'debug',
+        timedOut ? `Recipe fetch timed out after ${FETCH_TIMEOUT_MS}ms: ${url}` : `Recipe fetch threw for ${url}`,
+        timedOut ? undefined : error
+      );
     }
   }
   log('error', `Failed to fetch recipe URL (last status ${lastStatus}): ${url}`);

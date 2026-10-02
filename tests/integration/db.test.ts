@@ -267,3 +267,35 @@ describe('Database integration', () => {
     });
   });
 });
+
+describe('not importing the same recipe twice', () => {
+  // create() is a plain insert, so the import has to check first. Without this,
+  // re-running `make recipes` adds a second copy of every recipe already in the
+  // library, and a library holding the same dish twice skews what gets planned.
+  let ownDb: Database.Database;
+
+  beforeAll(() => {
+    ownDb = new Database(':memory:');
+    runMigrations(ownDb);
+  });
+
+  afterAll(() => ownDb.close());
+
+  it('finds a recipe by the URL it came from', () => {
+    const repo = new RecipeRepository(ownDb);
+    const sourceUrl = 'https://example.com/sweet-potato-black-bean-chili';
+
+    expect(repo.findBySourceUrl(sourceUrl)).toBeNull();
+
+    repo.create({
+      title: 'Sweet Potato Black Bean Chili',
+      servings: 6,
+      prepTimeMinutes: 15, cookTimeMinutes: 30,
+      ingredients: [], instructions: ['cook'], tags: [],
+      sourceUrl, dietaryFlags: [],
+    });
+
+    expect(repo.findBySourceUrl(sourceUrl)?.title).toBe('Sweet Potato Black Bean Chili');
+    expect(repo.findBySourceUrl('https://example.com/something-else')).toBeNull();
+  });
+});
