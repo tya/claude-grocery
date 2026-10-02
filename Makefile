@@ -78,6 +78,7 @@ chart-lint: ## Lint and render the chart without installing it
 # -------------------------------------------------------------------- cluster
 
 sync: ## Copy deploy/ to the node
+	@ssh $(NODE) 'mkdir -p $(REMOTE_DIR)/deploy'
 	rsync -a --delete --exclude seed/ deploy/ $(NODE):$(REMOTE_DIR)/deploy/
 
 preflight: sync ## Check the node (read-only) before changing anything
