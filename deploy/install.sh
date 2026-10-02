@@ -201,18 +201,62 @@ POD
   ok "volume seeded"
 }
 
+backup() {
+  # The image has no sqlite3, so there is no online .backup to lean on. Stop the
+  # writer, copy the file cold, start it again — the pod is down for seconds and
+  # the copy is guaranteed consistent.
+  out="${2:-/tmp}/claude-grocery-$(date +%Y%m%d-%H%M%S).db"
+  echo "==> cold backup to $out"
+
+  running=0
+  if [[ "$($K -n "$NS" get deploy meal-planner -o jsonpath='{.spec.replicas}' 2>/dev/null)" == "1" ]]; then
+    running=1
+    $K -n "$NS" scale deploy/meal-planner --replicas=0 >/dev/null
+    $K -n "$NS" wait --for=delete pod -l app.kubernetes.io/name=meal-planner --timeout=90s >/dev/null 2>&1 || true
+    ok "stopped the writer"
+  fi
+
+  $K -n "$NS" delete pod backup --ignore-not-found >/dev/null 2>&1 || true
+  $K -n "$NS" apply -f - >/dev/null <<'POD'
+apiVersion: v1
+kind: Pod
+metadata: { name: backup, namespace: meal-planner }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: backup
+      image: busybox
+      command: ["sh", "-c", "sleep 300"]
+      volumeMounts: [{ name: d, mountPath: /data, readOnly: true }]
+  volumes:
+    - name: d
+      persistentVolumeClaim: { claimName: meal-planner-data }
+POD
+  $K -n "$NS" wait --for=condition=Ready pod/backup --timeout=120s >/dev/null
+  $K -n "$NS" cp "backup:/data/claude-grocery.db" "$out"
+  $K -n "$NS" delete pod backup >/dev/null
+
+  if [[ $running -eq 1 ]]; then
+    $K -n "$NS" scale deploy/meal-planner --replicas=1 >/dev/null
+    $K -n "$NS" rollout status deploy/meal-planner --timeout=120s
+  fi
+  ls -lh "$out"
+  ok "backed up"
+}
+
 status() {
   $K -n "$NS" get pod,pvc,onepassworditem,secret 2>/dev/null || true
   echo
   $K -n "$NS" logs deploy/meal-planner --tail=30 2>/dev/null || echo "(no pod logs yet)"
 }
 
-case "${1:?usage: install.sh preflight|operator|deploy|seed|status}" in
+case "${1:?usage: install.sh preflight|operator|deploy|seed|status|backup}" in
   preflight) preflight ;;
   operator)  preflight; operator ;;
   deploy)    deploy_app ;;
   install)   deploy_app ;;
   seed)      seed ;;
   status)    status ;;
+  backup)    backup "$@" ;;
   *) die "unknown step: $1" ;;
 esac

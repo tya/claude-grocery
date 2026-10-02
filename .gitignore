@@ -11,3 +11,6 @@ server/dist/
 # Captured personal purchase history — never commit to a public fork
 data/*.json
 run.out
+
+# Database backups pulled off the cluster — never commit these
+backups/

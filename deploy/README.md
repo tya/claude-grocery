@@ -1,5 +1,9 @@
 # Running the meal planner on microk8s
 
+Most of this is wrapped in the Makefile at the repo root — `make` lists the
+targets, and the ones that touch the cluster go over ssh, so you can drive the
+whole thing from the Mac. The steps below are what those targets actually do.
+
 One pod, one volume, no inbound ports. The agent dials out to Slack over Socket
 Mode and to Kroger over HTTPS, so there is no Service, no Ingress and no
 certificate to manage.
