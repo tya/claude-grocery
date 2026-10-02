@@ -122,26 +122,27 @@ operator() {
 }
 
 deploy_app() {
-  echo "==> manifests"
-  $K apply -k "$HERE/k8s/" >/dev/null
-  ok "applied"
+  echo "==> helm"
+  microk8s helm3 upgrade --install meal-planner "$HERE/charts/meal-planner" \
+    --namespace "$NS" --create-namespace --wait --timeout 5m || {
+      echo
+      echo "  rollout did not finish. Usually the secrets have not synced:"
+      $K -n "$NS" get pod -o wide || true
+      $K -n "$OPNS" logs deploy/onepassword-connect-operator --tail=20 2>/dev/null || true
+      die "helm install failed"
+    }
+  ok "release installed"
 
-  echo "==> waiting for 1Password to hand over the secrets"
   for want in kroger-credentials slack-credentials; do
-    for i in $(seq 1 30); do
-      if $K -n "$NS" get secret "$want" >/dev/null 2>&1; then ok "$want"; break; fi
-      [[ $i -eq 30 ]] && {
-        echo
-        echo "  $want never appeared. Almost always one of:"
-        echo "    - the item is still in the Private vault (a service account cannot read it)"
-        echo "    - the service account was not granted the tynet vault"
-        echo "    - the item name does not match the itemPath in k8s/onepassword-items.yaml"
-        echo
-        $K -n "$OPNS" logs deploy/onepassword-connect-operator --tail=20 || true
-        die "secrets did not sync"
-      }
-      sleep 4
-    done
+    $K -n "$NS" get secret "$want" >/dev/null 2>&1 && ok "$want synced" || {
+      echo
+      echo "  $want never appeared. Almost always one of:"
+      echo "    - the item is still in the Private vault (a service account cannot read it)"
+      echo "    - the service account was not granted the tynet vault"
+      echo "    - the item name does not match the itemPath in values.yaml"
+      $K -n "$OPNS" logs deploy/onepassword-connect-operator --tail=20 2>/dev/null || true
+      die "secrets did not sync"
+    }
   done
 }
 
@@ -150,14 +151,19 @@ seed() {
   for f in claude-grocery.db kroger-token.json week-events.json; do
     [[ -f "$HERE/seed/$f" ]] || die "put $f in $HERE/seed/ first (see README step 4)"
   done
+  $K -n "$NS" get pvc meal-planner-data >/dev/null 2>&1 \
+    || die "no volume yet — run ./install.sh deploy first, then seed"
 
-  # Copying a database with a live WAL gives you a torn copy. If the bot is
-  # still running on the Mac, stop it before this.
-  if [[ -f "$HERE/seed/claude-grocery.db-wal" ]]; then
-    warn "a -wal file came along: make sure the bot was stopped when you copied it"
+  # Stop the writer before touching its database. Scaling to zero is not a
+  # violation of the one-replica rule; running two copies would be.
+  had_pod=0
+  if $K -n "$NS" get deploy meal-planner >/dev/null 2>&1; then
+    had_pod=1
+    $K -n "$NS" scale deploy/meal-planner --replicas=0 >/dev/null
+    $K -n "$NS" wait --for=delete pod -l app.kubernetes.io/name=meal-planner --timeout=90s >/dev/null 2>&1 || true
+    ok "stopped the running pod"
   fi
 
-  $K apply -f "$HERE/k8s/namespace.yaml" -f "$HERE/k8s/pvc.yaml" >/dev/null
   $K -n "$NS" delete pod seed --ignore-not-found >/dev/null 2>&1 || true
   $K -n "$NS" apply -f - >/dev/null <<'POD'
 apiVersion: v1
@@ -176,12 +182,22 @@ spec:
       persistentVolumeClaim: { claimName: meal-planner-data }
 POD
   $K -n "$NS" wait --for=condition=Ready pod/seed --timeout=120s >/dev/null
+
+  # A first start may have created an empty database. Its WAL and shm would be
+  # read alongside the real file and give a torn view of it.
+  $K -n "$NS" exec seed -- sh -c 'rm -f /data/claude-grocery.db-wal /data/claude-grocery.db-shm' || true
+
   for f in claude-grocery.db kroger-token.json week-events.json; do
     $K -n "$NS" cp "$HERE/seed/$f" "seed:/data/$f"
     ok "copied $f"
   done
   $K -n "$NS" exec seed -- ls -l /data
   $K -n "$NS" delete pod seed >/dev/null
+
+  if [[ $had_pod -eq 1 ]]; then
+    $K -n "$NS" scale deploy/meal-planner --replicas=1 >/dev/null
+    $K -n "$NS" rollout status deploy/meal-planner --timeout=120s
+  fi
   ok "volume seeded"
 }
 
@@ -195,6 +211,7 @@ case "${1:?usage: install.sh preflight|operator|deploy|seed|status}" in
   preflight) preflight ;;
   operator)  preflight; operator ;;
   deploy)    deploy_app ;;
+  install)   deploy_app ;;
   seed)      seed ;;
   status)    status ;;
   *) die "unknown step: $1" ;;

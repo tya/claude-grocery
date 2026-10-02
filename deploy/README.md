@@ -79,44 +79,62 @@ The Deployment refers to `localhost:32000/meal-planner:0.1.0`. That is correct
 even when you push to `pi.lan:32000`: containerd resolves it on the node, where
 the registry is local.
 
-## 4. Seed the volume
-
-The database and the Kroger refresh token already exist on your Mac. A fresh
-start would lose two years of history and force a re-auth.
-
-**Stop the bot first.** Copying a database with a live WAL gives you a torn
-copy — this is the step in the whole process with a real, irreversible cost.
+## 4. Install the chart
 
 ```sh
-# On the Mac, with the bot stopped:
+./install.sh deploy
+```
+
+Wraps `helm upgrade --install meal-planner ./charts/meal-planner`. Everything
+configurable lives in `charts/meal-planner/values.yaml` — the vault name, the
+budget caps, the store, the image tag, the resource ceiling. Override per
+install in the usual way:
+
+```sh
+microk8s helm3 upgrade --install meal-planner ./charts/meal-planner \
+  -n meal-planner --create-namespace \
+  --set image.tag=0.2.0 --set pushOnStart=false
+```
+
+The first start will create an empty database. That is expected; the next step
+replaces it.
+
+## 5. Seed the volume
+
+The real database and the Kroger refresh token are on your Mac. Without them the
+agent starts from nothing: no purchase history, no recipes, and a re-auth.
+
+**Stop the local bot first**, then checkpoint the WAL — copying a database with
+a live WAL gives you a torn copy, and this is the one irreversible step in the
+whole process.
+
+```sh
+# On the Mac, bot stopped:
 sqlite3 ~/.claude-grocery/claude-grocery.db 'PRAGMA wal_checkpoint(TRUNCATE);'
 scp ~/.claude-grocery/claude-grocery.db \
     ~/.config/claude-grocery/kroger-token.json \
     ~/src/claude-grocery-kroger-agent/data/week-events.json \
-    pi.lan:~/claude-grocery-kroger-agent/deploy/seed/
+    pi1.tynet.us:~/claude-grocery-kroger-agent/deploy/seed/
 
 # On the Pi:
 ./install.sh seed
 ```
 
-`deploy/seed/` is gitignored — the database and the token must never end up in
-the repo.
+`seed` scales the deployment to zero before touching the volume, clears any WAL
+left by the empty database, copies the three files, and scales back up. Scaling
+to zero is not a breach of the one-replica rule — running two copies would be.
 
-## 5. Deploy
+`deploy/seed/` is gitignored: neither the database nor the token belongs in the
+repo.
+
+## 6. Check it
 
 ```sh
-./install.sh deploy
 ./install.sh status
 ```
 
-`deploy` waits for the operator to produce both Secrets and, if they never
-arrive, prints the three things that actually cause it — item still in
-`Private`, vault not granted to the service account, item name not matching
-`itemPath` — along with the operator's own log.
-
-The `--push` arg in `deployment.yaml` makes it post the week on start, which is
-the real smoke test: if a plan shows up in Slack, every piece of this worked.
-Remove it once a timer exists.
+With `pushOnStart` left on, a plan appearing in Slack is the end-to-end proof —
+image, volume, secrets and both API credentials all working.
 
 ## What is deliberately not here
 
