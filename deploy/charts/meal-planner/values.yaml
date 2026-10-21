@@ -55,8 +55,12 @@ resources:
   limits: { cpu: "1", memory: 512Mi }
 
 # On a multi-node cluster, pin this to the node holding the SSD — hostpath
-# storage cannot follow a reschedule.
-nodeSelector: {}
+# storage cannot follow a reschedule. pi1 is that node: it's where
+# hostpath-storage was enabled and where every other hostpath-backed
+# workload (tynet-cloud-init, the hostpath-provisioner pod itself) already
+# runs.
+nodeSelector:
+  kubernetes.io/hostname: pi1
 tolerations: []
 
 podSecurityContext:
