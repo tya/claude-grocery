@@ -1,4 +1,5 @@
-# One pod, one volume, no inbound ports.
+# One pod, one volume. The only inbound port is the status page below —
+# Slack itself comes in over Socket Mode, which dials out.
 
 image:
   # The node resolves localhost:32000 to its own registry, so this is correct
@@ -31,6 +32,19 @@ env:
   SLACK_USER_ID: { secret: slack-credentials, key: user_id }
   SLACK_ALLOWED_USERS: { secret: slack-credentials, key: allowed_users }
   SLACK_CHANNEL: { secret: slack-credentials, key: channel_id }
+
+# A health check and a status page, nothing else — Slack itself needs no
+# inbound port. LoadBalancer (MetalLB) + a dedicated cert-manager Certificate,
+# same convention as argocd-server and tynet-cloud-init: no ingress
+# controller in this cluster, so each app that wants one terminates TLS
+# itself. The A record is added by hand in UniFi, LAN-only.
+statusServer:
+  enabled: true
+  port: 8443
+  hostname: mealplans.tynet.us
+  tls:
+    secretName: meal-planner-tls
+    issuerName: letsencrypt-cloudflare
 
 config:
   TZ: America/Denver
