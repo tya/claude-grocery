@@ -22,3 +22,11 @@ Almost always one of:
 
 The volume is annotated helm.sh/resource-policy: keep, so `helm uninstall` will
 NOT delete the database. Remove the PVC by hand if you really mean to.
+
+{{ if .Values.statusServer.enabled -}}
+Status page at https://{{ .Values.statusServer.hostname }}/ (LAN only — the A
+record is added by hand in UniFi, not public DNS). Check the cert and the
+LoadBalancer IP it needs to point at:
+
+  microk8s kubectl -n {{ .Release.Namespace }} get certificate,svc
+{{- end }}

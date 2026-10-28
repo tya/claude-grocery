@@ -1,0 +1,14 @@
+{{- if .Values.statusServer.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "meal-planner.fullname" . }}-tls
+  labels: {{- include "meal-planner.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ .Values.statusServer.hostname }}
+  secretName: {{ .Values.statusServer.tls.secretName }}
+  issuerRef:
+    kind: ClusterIssuer
+    name: {{ .Values.statusServer.tls.issuerName }}
+{{- end }}

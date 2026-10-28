@@ -26,6 +26,7 @@ import { matchItem, summarizeMatches, type ProductMatch } from '../services/prod
 import { decideStaples, stapleItems } from '../services/staples.service.js';
 import { applyReplacement, findLine } from '../services/match-feedback.service.js';
 import { createSlackApp, type CartLine, type LineMatch, type PendingWeek } from './app.js';
+import { startStatusServer } from '../http/status-server.js';
 import { log } from '../utils/logger.js';
 import { nextSunday } from '../utils/week.js';
 
@@ -295,6 +296,7 @@ async function main(): Promise<void> {
 
   await slack.app.start();
   log('info', 'Slack bot running (socket mode). DM it "plan" to start.');
+  startStatusServer();
 
   if (process.argv.includes('--push')) {
     await slack.pushWeeklyPlan(process.env.SLACK_CHANNEL);

@@ -1,0 +1,19 @@
+{{- if .Values.statusServer.enabled }}
+# LoadBalancer (MetalLB), same convention as argocd-server and tynet-cloud-init:
+# no ingress controller in this cluster, so each app that needs an inbound
+# port gets its own external IP and terminates TLS itself. The A record
+# (mealplans.tynet.us -> this IP) is added by hand in UniFi, LAN-only, same
+# as those two.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "meal-planner.fullname" . }}-status
+  labels: {{- include "meal-planner.labels" . | nindent 4 }}
+spec:
+  type: LoadBalancer
+  selector: {{- include "meal-planner.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 443
+      targetPort: {{ .Values.statusServer.port }}
+{{- end }}
