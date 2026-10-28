@@ -19,7 +19,7 @@ TOKEN := $(HOME)/.config/claude-grocery/kroger-token.json
 CAL   := data/week-events.json
 
 .DEFAULT_GOAL := help
-.PHONY: help install build test typecheck check dev plan recipes history auth smoke \
+.PHONY: help install build test typecheck check dev plan plan-prices recipes history auth smoke \
         image image-tarball sync preflight operator deploy seed ship status logs \
         restart backup chart-lint clean
 
@@ -50,6 +50,9 @@ dev: ## Run the Slack bot locally, secrets from 1Password
 
 plan: ## Print next week's plan without touching Slack
 	$(OP) npm run plan:week
+
+plan-prices: ## Same, priced against KROGER_LOCATION_ID (nothing added to the cart)
+	$(OP) npm run plan:week -- --prices
 
 recipes: ## Import the recipes in data/recipe-urls.txt
 	$(OP) npm run recipes:import
